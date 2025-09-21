@@ -1,16 +1,24 @@
 import sys
 import requests
+import os
 from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QMessageBox, QDateEdit, \
     QFileDialog
 from PyQt5.QtCore import QDate
 
 
 class AttendanceDownloaderApp(QWidget):
+    """
+    A PyQt5 application to download attendance data from an API.
+    """
+
     def __init__(self):
+        """Initializes the application UI and state."""
         super().__init__()
         self.initUI()
+        self.save_path = "" # Variable to store the save path
 
     def initUI(self):
+        """Sets up the graphical user interface."""
         self.setWindowTitle("Attendance Downloader")
         self.setGeometry(100, 100, 400, 300)
         self.setStyleSheet("""
@@ -81,17 +89,24 @@ class AttendanceDownloaderApp(QWidget):
 
         self.setLayout(layout)
 
-        # Variable to store the save path
-        self.save_path = ""
-
     def choose_save_location(self):
-        self.save_path, _ = QFileDialog.getSaveFileName(self, "Save File", "", "Excel Files (*.xlsx);;All Files (*)")
+        """Opens a file dialog for the user to select the save path."""
+        # The file dialog now suggests a default filename based on current date
+        from datetime import datetime
+        current_date_str = datetime.now().strftime("%Y-%m-%d")
+        default_filename = f"Attendance-{current_date_str}.xlsx"
+        
+        self.save_path, _ = QFileDialog.getSaveFileName(self, "Save File", default_filename, "Excel Files (*.xlsx);;All Files (*)")
         if self.save_path:
             QMessageBox.information(self, "Save Location Selected", f"File will be saved to: {self.save_path}")
 
     def download_attendance(self):
-        class_number = self.class_input.text()
-        date = self.date_picker.text()
+        """
+        Validates user input and initiates the download process.
+        Shows a success or error message upon completion.
+        """
+        class_number = self.class_input.text().strip()
+        date = self.date_picker.text().strip()
 
         if not class_number:
             QMessageBox.warning(self, "Input Error", "Class number is required!")
@@ -108,38 +123,42 @@ class AttendanceDownloaderApp(QWidget):
             QMessageBox.critical(self, "Error", str(e))
 
     def fetch_and_save_excel(self, class_number, date=None):
-        base_url = "https://iec-group-of-institutions.onrender.com/raw-excel"
-        params = {"class_number": class_number}
-
+        """
+        Fetches the attendance data from the API and saves it to a file.
+        This function has been updated to use the correct URL format.
+        """
+        # The base URL now includes the class number directly in the path,
+        # as expected by the API.
+        url = f"https://iec-attendance-nodejs.onrender.com/faculty/dayExcel/{class_number}"
+        
+        params = {}
+        # Only add the 'date' as a query parameter if it is provided.
         if date and date.strip():
             params["date"] = date
 
-        response = requests.get(base_url, params=params)
+        response = requests.get(url, params=params)
 
         if response.status_code == 200:
-            filename = f"Attendance-{class_number}"
-            if date and date.strip():
-                filename += f"-{date}.xlsx"
-            else:
-                from datetime import datetime
-                current_date = datetime.now().strftime("%d-%m-%Y")
-                filename += f"-{current_date}.xlsx"
+            # Ensure the directory exists before saving the file
+            save_directory = os.path.dirname(self.save_path)
+            if save_directory and not os.path.exists(save_directory):
+                os.makedirs(save_directory)
 
-            # Combine save path with filename
-            full_save_path = self.save_path if self.save_path.endswith(
-                '.xlsx') else self.save_path + f"/{filename}.xlsx"
-
-            with open(full_save_path, 'wb') as f:
+            with open(self.save_path, 'wb') as f:
                 f.write(response.content)
         else:
             try:
-                error_message = response.json().get('error', 'Unknown error occurred')
-                raise Exception(f"Error: {error_message}")
-            except:
+                # Attempt to get a JSON error message from the response
+                error_data = response.json()
+                error_message = error_data.get('error', f'Unknown error occurred: {response.status_code}')
+                raise Exception(f"API Error: {error_message}")
+            except requests.exceptions.JSONDecodeError:
+                # If JSON parsing fails, provide a generic error message
                 raise Exception(f"Failed to download. Status Code: {response.status_code}")
 
 
 if __name__ == '__main__':
+    # This block ensures the application runs when the script is executed
     app = QApplication(sys.argv)
     ex = AttendanceDownloaderApp()
     ex.show()
